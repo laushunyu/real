@@ -117,14 +117,15 @@ func (s *server) Run() error {
 					if errors.Is(err, io.EOF) {
 						return
 					}
-					log.WithError(err).Fatal("failed to read pkt len")
+					log.WithError(err).Error("failed to read pkt len")
 					return
 				}
 				log.WithField("len", pktLen).Debug("get pkg len")
 
 				pktID, err := reader.ReadVarInt()
 				if err != nil {
-					log.WithError(err).Fatal("failed to read pkt id")
+					log.WithError(err).Error("failed to read pkt id")
+					return
 				}
 				log.WithField("id", pktID).Debug("get pkg id")
 
@@ -161,22 +162,10 @@ func (s *server) Run() error {
 					case 0x00:
 						// Handshake
 						log.Infof("start processing handshake pkt")
-						protocolVersion, err := reader.ReadVarInt()
-						if err != nil {
-							log.Fatal(err)
-						}
-						serverAddress, err := reader.ReadString()
-						if err != nil {
-							log.Fatal(err)
-						}
-						serverPort, err := reader.ReadShort()
-						if err != nil {
-							log.Fatal(err)
-						}
-						nextStateV, err := reader.ReadVarInt()
-						if err != nil {
-							log.Fatal(err)
-						}
+						protocolVersion, _ := reader.ReadVarInt()
+						serverAddress, _ := reader.ReadString()
+						serverPort, _ := reader.ReadShort()
+						nextStateV, _ := reader.ReadVarInt()
 
 						nextState := constants.ConnState(nextStateV)
 						log.Infof("client connect to %s:%d with protocol %x, want next state to be %q",
@@ -222,21 +211,17 @@ func (s *server) Run() error {
 
 						// send request pkt
 						requestPkt := packet.NewPacket(0x00)
-						if err := requestPkt.WriteString(string(raw)).Error; err != nil {
-							log.Fatal(err)
-						}
+						requestPkt.WriteString(string(raw))
 						log.WithField("id", pktID).Infof("send pkt reply")
 						player.Send(requestPkt)
 
 						// then server will send a pkt Ping
 						pingPkt := packet.NewPacket(0x01)
 						rInt := rand.Int63()
-						if err := pingPkt.WriteLong(uint64(rInt)).Error; err != nil {
-							log.Fatal(err)
-						}
+						pingPkt.WriteLong(uint64(rInt))
 						log.WithField("id", pktID).Infof("send pkt reply with rand int = %d", rInt)
 						player.Send(pingPkt)
-						return
+						continue
 
 					case 0x01:
 						log.WithField("id", pktID).Infof("get pkt pong back with rand int = %d", binary.BigEndian.Uint64(pkt.Data))
@@ -379,10 +364,7 @@ func (s *server) Run() error {
 						continue
 					case 0x00:
 						// ack Player Position And Look
-						teleportID, err := reader.ReadVarInt()
-						if err != nil {
-							log.Fatal(err)
-						}
+						teleportID, _ := reader.ReadVarInt()
 						_ = teleportID
 
 						continue
@@ -451,7 +433,7 @@ func (s *server) Run() error {
 
 func main() {
 	srv := NewServer(":65535")
-	log.Fatal(srv.Run())
+	log.Error(srv.Run())
 }
 
 type ServerInfo struct {
