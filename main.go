@@ -94,7 +94,7 @@ func (s *server) Run() error {
 		go func() {
 			defer func() {
 				if err := recover(); err != nil {
-					log.WithField("addr", player.Meta.RemoteAddr).Error("connection break with panic: %+v", err)
+					log.WithField("addr", player.Meta.RemoteAddr).Errorf("connection break with panic: %+v", err)
 				}
 			}()
 			defer player.Close()
@@ -328,31 +328,31 @@ func (s *server) Run() error {
 					case 0x0d:
 						// Player Position
 						// Updates the player's XYZ position on the server.
-
-						player.PL.X, _ = reader.ReadDouble()
-						player.PL.Y, _ = reader.ReadDouble()
-						player.PL.Z, _ = reader.ReadDouble()
-						player.PL.OnGround, _ = reader.ReadBoolean()
+						x, _ := reader.ReadDouble()
+						y, _ := reader.ReadDouble()
+						z, _ := reader.ReadDouble()
+						onGround, _ := reader.ReadBoolean()
+						player.ChangePL(&Position{X: x, Y: y, Z: z}, nil, onGround)
 
 						continue
 					case 0x0e:
 						// Player Position And Look
 						// A combination of Player Look and Player Position.
-
-						player.PL.X, _ = reader.ReadDouble()
-						player.PL.Y, _ = reader.ReadDouble()
-						player.PL.Z, _ = reader.ReadDouble()
-						player.PL.Yaw, _ = reader.ReadFloat()
-						player.PL.Pitch, _ = reader.ReadFloat()
-						player.PL.OnGround, _ = reader.ReadBoolean()
+						x, _ := reader.ReadDouble()
+						y, _ := reader.ReadDouble()
+						z, _ := reader.ReadDouble()
+						yaw, _ := reader.ReadFloat()
+						pitch, _ := reader.ReadFloat()
+						onGround, _ := reader.ReadBoolean()
+						player.ChangePL(&Position{X: x, Y: y, Z: z}, &Look{yaw, pitch}, onGround)
 						continue
 					case 0x0f:
 						// Player Look
 						// Updates the direction the player is looking in.
-
-						player.PL.Yaw, _ = reader.ReadFloat()
-						player.PL.Pitch, _ = reader.ReadFloat()
-						player.PL.OnGround, _ = reader.ReadBoolean()
+						yaw, _ := reader.ReadFloat()
+						pitch, _ := reader.ReadFloat()
+						onGround, _ := reader.ReadBoolean()
+						player.ChangePL(nil, &Look{yaw, pitch}, onGround)
 						continue
 					case 0x09:
 						// Plugin Message
@@ -403,6 +403,7 @@ func (s *server) Run() error {
 											WriteRaw([]byte{byte(player.PL.Pitch)}).
 											WriteNbt(nbt.Compound{})
 										player.Send(spawnPlayer)
+
 									}
 								}
 							}
@@ -429,11 +430,6 @@ func (s *server) Run() error {
 			}
 		}()
 	}
-}
-
-func main() {
-	srv := NewServer(":65535")
-	log.Error(srv.Run())
 }
 
 type ServerInfo struct {
@@ -474,6 +470,14 @@ type PositionAndLook struct {
 	OnGround   bool
 }
 
+type Position struct {
+	X, Y, Z float64
+}
+
+type Look struct {
+	Yaw, Pitch float32
+}
+
 type Player struct {
 	PL        PositionAndLook
 	ConnState constants.ConnState
@@ -489,6 +493,34 @@ type PlayerMeta struct {
 	RemoteAddr string
 	User       string
 	UserID     uuid.UUID
+}
+
+func (player *Player) ChangePL(position *Position, look *Look, onGround bool) {
+	if position != nil {
+		oldChunkX, oldChunkZ := int64(player.PL.X)/16, int64(player.PL.Z)/16
+		newChunkX, newChunkZ := int64(position.X)/16, int64(position.Z)/16
+
+		player.PL.X = position.X
+		player.PL.Y = position.Y
+		player.PL.Z = position.Z
+
+		if oldChunkX != newChunkX || oldChunkZ != newChunkZ {
+			ec.Send(EventChunkChange{
+				player: player,
+				SrcX:   oldChunkX,
+				SrcZ:   oldChunkZ,
+				DstX:   newChunkX,
+				DstZ:   newChunkZ,
+			})
+		}
+	}
+
+	if look != nil {
+		player.PL.Yaw = look.Yaw
+		player.PL.Pitch = look.Pitch
+	}
+
+	player.PL.OnGround = onGround
 }
 
 func (player *Player) SendChat(msg Chat) {
@@ -547,4 +579,9 @@ func NewPlayer(conn net.Conn) *Player {
 		}
 	}()
 	return player
+}
+
+func main() {
+	srv := NewServer(":65535")
+	log.Error(srv.Run())
 }
